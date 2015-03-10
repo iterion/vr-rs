@@ -30,7 +30,7 @@ fn main() {
             .status()
             .ok().expect("Failed to build");
     Command::new("lipo")
-            .arg("modules/oculus_sdk_mac/LibOVR/Lib/MacOS/Release/libovr.a")
+            .arg("modules/oculus_sdk_mac/LibOVR/Lib/Mac/Release/libovr.a")
             .arg("-thin")
             .arg("x86_64")
             .arg("-output")

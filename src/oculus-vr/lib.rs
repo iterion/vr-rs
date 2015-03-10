@@ -1,6 +1,6 @@
 #![crate_name = "ovr"]
 #![crate_type = "lib"]
-#![feature(link_args, path, core, std_misc)]
+#![feature(link_args, std_misc)]
 #![allow(non_upper_case_globals)]
 
 extern crate cgmath;
@@ -31,6 +31,7 @@ extern {}
 #[link(name = "Cocoa", kind = "framework")]
 #[link(name = "IOKit", kind = "framework")]
 #[link(name = "CoreFoundation", kind = "framework")]
+#[link(name = "OpenGL", kind = "framework")]
 extern {}
 
 
@@ -110,43 +111,75 @@ pub mod ll {
 
     #[derive(Clone, Default, Debug, Copy)]
     #[repr(C)]
-    pub struct SensorState {
-        pub predicted: PoseState,
-        pub recorded: PoseState,
+    pub struct SensorData {
+        pub accelerometer: Vector3f,
+        pub gyro: Vector3f,
+        pub magnetometer: Vector3f,
         pub temperature: c_float,
-        pub status_flags: c_uint
+        pub time_in_seconds: c_float
     }
 
-    #[derive(Clone, Debug, Copy)]
-    pub enum Hmd {}
+    #[derive(Clone, Default, Debug, Copy)]
+    #[repr(C)]
+    pub struct TrackingState {
+        pub head_pose: PoseState,
+        pub camera_pose: Posef,
+        pub leveled_camera_pose: Posef,
+        pub raw_sensor_data: SensorData,
+        pub status_flags: c_uint,
+        pub last_vision_processing_time: c_double,
+        pub last_vision_frame_latency: c_double,
+        pub last_camera_frame_counter: c_uint
+    }
 
     #[repr(C)]
-    pub struct HmdDesc {
-        pub handle: *const Hmd,
+    pub struct HmdStruct;
+
+    #[repr(C)]
+    pub struct Hmd {
+        pub handle: *const HmdStruct,
         pub hmd_type: c_int,
         pub product_name: *const c_char,
-        pub manufacture: *const c_char,
+        pub manufacturer: *const c_char,
+        pub vendor_id: c_short,
+        pub product_id: c_short,
+        pub serial_number: [c_char; 24],
+        pub firmware_major: c_short,
+        pub firmware_minor: c_short,
+        pub camera_frustum_h_fov: c_float,
+        pub camera_frustum_v_fov: c_float,
+        pub camera_frustum_near_z: c_float,
+        pub camera_frustum_far_z: c_float,
         pub hmd_capabilities: c_uint,
-        pub sensor_capabilities: c_uint,
+        pub tracking_capabilities: c_uint,
         pub distortion_capabilities: c_uint,
-        pub resolution: Sizei,
-        pub window_position: Vector2i,
         pub default_eye_fov: [FovPort; 2],
         pub max_eye_fov: [FovPort; 2],
         pub eye_render_order: [c_uint; 2],
+        pub resolution: Sizei,
+        pub window_position: Vector2i,
         pub display_device_name: *const c_char,
         pub display_id: c_int
     }
 
-    impl Default for HmdDesc {
-        fn default() -> HmdDesc {
-            HmdDesc {
+    impl Default for Hmd {
+        fn default() -> Hmd {
+            Hmd {
                 handle: ptr::null(),
                 hmd_type: 0,
                 product_name: ptr::null(),
-                manufacture: ptr::null(),
+                manufacturer: ptr::null(),
+                vendor_id: 0,
+                product_id: 0,
+                serial_number: [0; 24],
+                firmware_major: 0,
+                firmware_minor: 0,
+                camera_frustum_h_fov: 0f32,
+                camera_frustum_v_fov: 0f32,
+                camera_frustum_near_z: 0f32,
+                camera_frustum_far_z: 0f32,
                 hmd_capabilities: 0,
-                sensor_capabilities: 0,
+                tracking_capabilities: 0,
                 distortion_capabilities: 0,
                 resolution: Default::default(),
                 window_position: Default::default(),
@@ -185,7 +218,6 @@ pub mod ll {
         pub multisample: c_int,
     }
 
-    #[derive(Copy, Debug, Clone)]
     #[repr(C)]
     pub struct RenderApiConfig {
         pub header: RenderApiConfigHeader,
@@ -237,9 +269,10 @@ pub mod ll {
     pub const HmdCap_NoRestore              : c_uint = 0x4000;
     pub const HmdCap_Writable_Mask          : c_uint = 0x1380;
 
-    pub const SensorCap_Orientation         : c_uint = 0x0010;
-    pub const SensorCap_YawCorrection       : c_uint = 0x0020;
-    pub const SensorCap_Position            : c_uint = 0x0040;
+    pub const TrackingCap_Orientation       : c_uint = 0x0010;
+    pub const TrackingCap_MagYawCorrection  : c_uint = 0x0020;
+    pub const TrackingCap_Position          : c_uint = 0x0040;
+    pub const TrackingCap_Idle              : c_uint = 0x0100;
 
     pub const Status_OrientationTracked     : c_uint = 0x0001;
     pub const Status_PositionTracked        : c_uint = 0x0002;
@@ -265,37 +298,30 @@ pub mod ll {
         pub fn ovr_Initialize() -> bool;
         pub fn ovr_Shutdown();
         pub fn ovrHmd_Detect() -> c_int;
-        pub fn ovrHmd_Create(index: c_int) -> *mut Hmd;
-        pub fn ovrHmd_Destroy(hmd: *mut Hmd);
-        pub fn ovrHmd_CreateDebug(hmd_type: c_int) -> *mut Hmd;
-        pub fn ovrHmd_GetLastError(hmd: *mut Hmd) -> *const c_char;
-        pub fn ovrHmd_GetEnabledCaps(hmd: *mut Hmd) -> c_uint;
-        pub fn ovrHmd_SetEnabledCaps(hmd: *mut Hmd, flags: c_uint);
-        pub fn ovrHmd_StartSensor(hmd: *mut Hmd,
-                                  supported: c_uint,
-                                  required: c_uint) -> bool;
-        pub fn ovrHmd_StopSensor(hmd: *mut Hmd);
-        pub fn ovrHmd_ResetSensor(hmd: *mut Hmd);
-        pub fn ovrHmd_GetSensorState(hmd: *mut Hmd,
-                                     abs_time: c_double) -> SensorState;
-        pub fn ovrHmd_GetSensorDesc(hmd: *mut Hmd,
-                                    sensor_desc: *mut SensorDesc) -> bool;
-        pub fn ovrHmd_GetDesc(hmd: *mut Hmd,
-                              size: *mut HmdDesc);
-        pub fn ovrHmd_GetFovTextureSize(hmd: *mut Hmd,
+        pub fn ovrHmd_Create(index: c_int) -> *const Hmd;
+        pub fn ovrHmd_Destroy(hmd: *const Hmd);
+        pub fn ovrHmd_CreateDebug(hmd_type: c_int) -> *const Hmd;
+        pub fn ovrHmd_GetLastError(hmd: *const Hmd) -> *const c_char;
+        pub fn ovrHmd_GetEnabledCaps(hmd: *const Hmd) -> c_uint;
+        pub fn ovrHmd_SetEnabledCaps(hmd: *const Hmd, flags: c_uint);
+        pub fn ovrHmd_ConfigureTracking(hmd: *const Hmd,
+                                        supported_tracking_caps: c_uint,
+                                        required_tracking_caps: c_uint) -> bool;
+        pub fn ovrHmd_GetTrackingState(hmd: *const Hmd, abs_time: c_double) -> TrackingState;
+        pub fn ovrHmd_GetFovTextureSize(hmd: *const Hmd,
                                         eye: c_uint,
                                         fov: FovPort,
                                         pixels: c_float) -> Sizei;
-        pub fn ovrHmd_ConfigureRendering(hmd: *mut Hmd,
+        pub fn ovrHmd_ConfigureRendering(hmd: *const Hmd,
                                          apiConfig: *const RenderApiConfig,
                                          distortionCaps: c_uint,
                                          fov_in: *const FovPort,
                                          render_desc_out: *mut EyeRenderDesc) -> bool;
-        pub fn ovrHmd_BeginFrame(hmd: *mut Hmd,
+        pub fn ovrHmd_BeginFrame(hmd: *const Hmd,
                                  frame_index: c_uint) -> FrameTiming;
-        pub fn ovrHmd_EndFrame(hmd: *mut Hmd);
-        pub fn ovrHmd_BeginEyeRender(hmd: *mut Hmd, eye: c_uint) -> Posef;
-        pub fn ovrHmd_EndEyeRender(hmd: *mut Hmd, eye: c_uint, 
+        pub fn ovrHmd_EndFrame(hmd: *const Hmd);
+        pub fn ovrHmd_BeginEyeRender(hmd: *const Hmd, eye: c_uint) -> Posef;
+        pub fn ovrHmd_EndEyeRender(hmd: *const Hmd, eye: c_uint, 
                                    pose: Posef, texture: *const Texture);
         pub fn ovrMatrix4f_Projection(fov: FovPort,
                                       znear: c_float,
@@ -370,9 +396,10 @@ impl Ovr {
 
     pub fn create_hmd(&self, index: isize) -> Option<Hmd> {
         unsafe {
-            let ptr = ll::ovrHmd_Create(index as i32);
-            if !ptr.is_null() {
-                Some(Hmd { ptr: ptr })
+            let desc = ll::ovrHmd_Create(index as i32);
+            let hmd = Hmd::from_ll(desc);
+            if !hmd.handle.is_null() {
+                Some(hmd)
             } else {
                 None
             }
@@ -389,9 +416,10 @@ impl Ovr {
 
     pub fn create_hmd_debug(&self, hmd_type: HmdType) -> Option<Hmd> {
         unsafe {
-            let ptr = ll::ovrHmd_CreateDebug(hmd_type.to_ll());
-            if !ptr.is_null() {
-                Some(Hmd{ptr:ptr})
+            let desc = ll::ovrHmd_CreateDebug(hmd_type.to_ll());
+            let hmd = Hmd::from_ll(desc);
+            if !hmd.handle.is_null() {
+                Some(hmd)
             } else {
                 None
             }
@@ -405,23 +433,94 @@ impl Drop for Ovr {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Hmd {
-    ptr: *mut ll::Hmd
+    pub handle: *const ll::Hmd,
+    pub hmd_type: HmdType,
+    pub product_name: String,
+    pub manufacturer: String,
+    pub vendor_id: i16,
+    pub product_id: i16,
+    pub serial_number: String,
+    pub firmware_major: i16,
+    pub firmware_minor: i16,
+    pub camera_frustum_h_fov: f32,
+    pub camera_frustum_v_fov: f32,
+    pub camera_frustum_near_z: f32,
+    pub camera_frustum_far_z: f32,
+    pub hmd_capabilities: HmdCapabilities,
+    pub tracking_capabilities: TrackingCapabilities,
+    pub distortion_capabilities: DistortionCapabilities,
+    pub default_eye_fov: PerEye<FovPort>,
+    pub max_eye_fov: PerEye<FovPort>,
+    pub eye_render_order: [Eye; 2],
+    pub resolution: ll::Sizei,
+    pub window_position: ll::Vector2i,
+    pub display_device_name: String,
+    pub display_id: i32
 }
 
+// pub struct Hmd {
+//     ptr: *mut ll::Hmd
+// }
+//
 unsafe impl Sync for Hmd {}
 unsafe impl Send for Hmd {}
 
 impl Drop for Hmd {
     fn drop(&mut self) {
-        unsafe {ll::ovrHmd_Destroy(self.ptr)}
+        unsafe {ll::ovrHmd_Destroy(self.handle)}
     }
 }
 
 impl Hmd {
+    fn from_ll(sd: *const ll::Hmd) -> Hmd {
+        unsafe {
+            let hmd: &ll::Hmd = &*sd;
+            Hmd {
+                handle: sd,
+                hmd_type: HmdType::from_ll(hmd.hmd_type),
+                product_name: from_buf((hmd.product_name as *const i8) as *const u8),
+                manufacturer: from_buf((hmd.manufacturer as *const i8) as *const u8),
+                vendor_id: hmd.vendor_id,
+                product_id: hmd.product_id,
+                serial_number: "1".to_string(),
+                firmware_major: hmd.firmware_major,
+                firmware_minor: hmd.firmware_minor,
+                camera_frustum_h_fov: hmd.camera_frustum_h_fov,
+                camera_frustum_v_fov: hmd.camera_frustum_v_fov,
+                camera_frustum_near_z: hmd.camera_frustum_near_z,
+                camera_frustum_far_z: hmd.camera_frustum_far_z,
+                hmd_capabilities: HmdCapabilities{
+                    flags: hmd.hmd_capabilities
+                },
+                tracking_capabilities: TrackingCapabilities{
+                    flags: hmd.tracking_capabilities
+                },
+                distortion_capabilities: DistortionCapabilities{
+                    flags: hmd.distortion_capabilities
+                },
+                resolution: hmd.resolution,
+                window_position: hmd.window_position,
+                default_eye_fov: PerEye::new(
+                    FovPort::from_ll(hmd.default_eye_fov[ll::Eye_Left as usize]),
+                    FovPort::from_ll(hmd.default_eye_fov[ll::Eye_Right as usize])
+                ),
+                max_eye_fov: PerEye::new(
+                    FovPort::from_ll(hmd.max_eye_fov[ll::Eye_Left as usize]),
+                    FovPort::from_ll(hmd.max_eye_fov[ll::Eye_Right as usize])
+                ),
+                eye_render_order: [Eye::from_ll(hmd.eye_render_order[0]),
+                                   Eye::from_ll(hmd.eye_render_order[1])],
+                display_device_name: from_buf((hmd.display_device_name as *const i8) as *const u8),
+                display_id: hmd.display_id
+            }
+        }
+    }
+
     pub fn get_last_error(&self) -> Result<(), String> {
         unsafe {
-            let ptr = ll::ovrHmd_GetLastError(self.ptr);
+            let ptr = ll::ovrHmd_GetLastError(self.handle);
             if ptr.is_null() {
                 Ok(())
             } else {
@@ -432,65 +531,29 @@ impl Hmd {
 
     pub fn get_enabled_caps(&self) -> HmdCapabilities {
         unsafe {
-            let flags = ll::ovrHmd_GetEnabledCaps(self.ptr);
+            let flags = ll::ovrHmd_GetEnabledCaps(self.handle);
             HmdCapabilities{flags:flags}
         }
     }
 
-    pub fn set_enabled_caps(&self, cap: SensorCapabilities) {
+    pub fn set_enabled_caps(&self, cap: TrackingCapabilities) {
         unsafe {
             let flags = cap.flags;
-            ll::ovrHmd_SetEnabledCaps(self.ptr, flags);
+            ll::ovrHmd_SetEnabledCaps(self.handle, flags);
         }
     }
 
-    pub fn start_sensor(&self,
-                        supported: SensorCapabilities,
-                        required: SensorCapabilities) -> bool {
+    pub fn configure_tracking(&self,
+                              supported: TrackingCapabilities,
+                              required: TrackingCapabilities) -> bool {
         unsafe {
-            ll::ovrHmd_StartSensor(self.ptr, supported.flags, required.flags)
+            ll::ovrHmd_ConfigureTracking(self.handle, supported.flags, required.flags)
         }
     }
 
-    pub fn stop_sensor(&self) {
+    pub fn get_tracking_state(&self, abs_time: f64) -> TrackingState {
         unsafe {
-            ll::ovrHmd_StopSensor(self.ptr)
-        }
-    }
-
-    pub fn reset_sensor(&self) {
-        unsafe {
-            ll::ovrHmd_StopSensor(self.ptr)
-        }
-    }
-
-    pub fn get_sensor_state(&self, abs_time: f64) -> SensorState {
-        unsafe {
-            SensorState::from_ll(ll::ovrHmd_GetSensorState(self.ptr, abs_time))
-        }
-    }
-
-    pub fn get_sensor_description(&self) -> Option<SensorDescription> {
-        unsafe {
-            let mut c_desc = ll::SensorDesc {
-                vendor_id: 0,
-                product_id: 0,
-                serial_number: [0; 24]
-            };
-
-            if !ll::ovrHmd_GetSensorDesc(self.ptr, &mut c_desc as *mut ll::SensorDesc) {
-                None
-            } else {
-                Some(SensorDescription::from_ll(c_desc))
-            }
-        }
-    }
-
-    pub fn get_description(&self) -> HmdDescription {
-        unsafe {
-            let mut c_desc = Default::default();
-            ll::ovrHmd_GetDesc(self.ptr, &mut c_desc);
-            HmdDescription::from_ll(c_desc)
+            TrackingState::from_ll(ll::ovrHmd_GetTrackingState(self.handle, abs_time))
         }
     }
 
@@ -499,7 +562,7 @@ impl Hmd {
                                 fov: FovPort,
                                 pixels_per_display_pixel: f32) -> ll::Sizei {
         unsafe {
-            ll::ovrHmd_GetFovTextureSize(self.ptr,
+            ll::ovrHmd_GetFovTextureSize(self.handle,
                                          eye.to_ll(),
                                          fov.to_ll(),
                                          pixels_per_display_pixel)
@@ -514,7 +577,7 @@ impl Hmd {
             let mut out: PerEye<ll::EyeRenderDesc> = PerEye::new(Default::default(),
                                                                  Default::default());
             let was_started = ll::ovrHmd_ConfigureRendering(
-                self.ptr,
+                self.handle,
                 &api_config.to_render_config(),
                 cap.flags,
                 eye_fov.map(|_, d| d.to_ll()).ptr(),
@@ -532,20 +595,20 @@ impl Hmd {
     pub fn begin_frame(&self, frame_index: usize) -> FrameTiming {
         unsafe {
             FrameTiming::from_ll(
-                ll::ovrHmd_BeginFrame(self.ptr, frame_index as c_uint)
+                ll::ovrHmd_BeginFrame(self.handle, frame_index as c_uint)
             )
         }
     }
 
     pub fn end_frame(&self) {
         unsafe {
-            ll::ovrHmd_EndFrame(self.ptr);
+            ll::ovrHmd_EndFrame(self.handle);
         }
     }
 
     pub fn begin_eye_render(&self, eye: Eye) -> Pose {
         unsafe {
-            Pose::from_ll(ll::ovrHmd_BeginEyeRender(self.ptr, eye.to_ll()))
+            Pose::from_ll(ll::ovrHmd_BeginEyeRender(self.handle, eye.to_ll()))
         }
     }
 
@@ -554,7 +617,7 @@ impl Hmd {
                                         pose: Pose,
                                         texture: &T) {
         unsafe {
-            ll::ovrHmd_EndEyeRender(self.ptr,
+            ll::ovrHmd_EndEyeRender(self.handle,
                                     eye.to_ll(),
                                     pose.to_ll(),
                                     &texture.to_texture());
@@ -640,58 +703,73 @@ impl HmdCapabilities {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub struct SensorCapabilities {
+pub struct TrackingCapabilities {
     flags: c_uint
 }
 
-impl SensorCapabilities {
-    pub fn new() -> SensorCapabilities {
-        SensorCapabilities {
+impl TrackingCapabilities {
+    pub fn new() -> TrackingCapabilities {
+        TrackingCapabilities {
             flags: 0
         }
     }
 
     pub fn orientation(&self) -> bool {
-        self.flags & ll::SensorCap_Orientation ==
-            ll::SensorCap_Orientation
+        self.flags & ll::TrackingCap_Orientation ==
+            ll::TrackingCap_Orientation
     }
 
     pub fn yaw_correction(&self) -> bool {
-        self.flags & ll::SensorCap_YawCorrection ==
-            ll::SensorCap_YawCorrection
+        self.flags & ll::TrackingCap_MagYawCorrection ==
+            ll::TrackingCap_MagYawCorrection
     }
 
     pub fn position(&self) -> bool {
-        self.flags & ll::SensorCap_Position ==
-            ll::SensorCap_Position
+        self.flags & ll::TrackingCap_Position ==
+            ll::TrackingCap_Position
     }
 
-    pub fn set_orientation(&self, flag: bool) -> SensorCapabilities {
-        SensorCapabilities {flags: 
+    pub fn idle(&self) -> bool {
+        self.flags & ll::TrackingCap_Idle ==
+            ll::TrackingCap_Idle
+    }
+
+    pub fn set_orientation(&self, flag: bool) -> TrackingCapabilities {
+        TrackingCapabilities {flags: 
             if flag {
-                self.flags | ll::SensorCap_Orientation
+                self.flags | ll::TrackingCap_Orientation
             } else {
-                self.flags & !ll::SensorCap_Orientation
+                self.flags & !ll::TrackingCap_Orientation
             }
         }
     }
 
-    pub fn set_yaw_correction(&self, flag: bool) -> SensorCapabilities {
-        SensorCapabilities {flags: 
+    pub fn set_yaw_correction(&self, flag: bool) -> TrackingCapabilities {
+        TrackingCapabilities {flags: 
             if flag {
-                self.flags | ll::SensorCap_YawCorrection
+                self.flags | ll::TrackingCap_MagYawCorrection
             } else {
-                self.flags & !ll::SensorCap_YawCorrection
+                self.flags & !ll::TrackingCap_MagYawCorrection
             }
         }
     }
 
-    pub fn set_position(&self, flag: bool) -> SensorCapabilities {
-        SensorCapabilities {flags: 
+    pub fn set_position(&self, flag: bool) -> TrackingCapabilities {
+        TrackingCapabilities {flags: 
             if flag {
-                self.flags | ll::SensorCap_Position
+                self.flags | ll::TrackingCap_Position
             } else {
-                self.flags & !ll::SensorCap_Position
+                self.flags & !ll::TrackingCap_Position
+            }
+        }
+    }
+
+    pub fn set_idle(&self, flag: bool) -> TrackingCapabilities {
+        TrackingCapabilities {flags:
+            if flag {
+                self.flags | ll::TrackingCap_Idle
+            } else {
+                self.flags & !ll::TrackingCap_Idle
             }
         }
     }
@@ -856,37 +934,50 @@ impl PoseState {
     }
 }
 
-#[derive(Copy, Clone)]
-pub struct SensorState {
-    pub predicted: PoseState,
-    pub recorded: PoseState,
-    pub temperature: f32,
-    pub status_flags: Status
+#[derive(Debug, Copy, Clone)]
+pub struct SensorData {
+    pub accelerometer: Vector3<f32>,
+    pub gyro: Vector3<f32>,
+    pub magnetometer: Vector3<f32>,
+    pub temperature: f64,
+    pub time_in_seconds: f64
 }
 
-impl SensorState {
-    fn from_ll(ss: ll::SensorState) -> SensorState {
-        SensorState {
-            predicted: PoseState::from_ll(ss.predicted),
-            recorded: PoseState::from_ll(ss.recorded),
-            temperature: ss.temperature as f32,
-            status_flags: Status{flags: ss.status_flags}
+impl SensorData {
+    fn from_ll(sensor_data: ll::SensorData) -> SensorData {
+        SensorData {
+            accelerometer: to_vec3(sensor_data.accelerometer),
+            gyro: to_vec3(sensor_data.gyro),
+            magnetometer: to_vec3(sensor_data.magnetometer),
+            temperature: sensor_data.temperature as f64,
+            time_in_seconds: sensor_data.time_in_seconds as f64
         }
     }
 }
-#[derive(Debug)]
-pub struct SensorDescription {
-    pub vendor_id: i16,
-    pub product_id: i16,
-    pub serial_number: String,
+
+#[derive(Copy, Clone)]
+pub struct TrackingState {
+    pub head_pose: PoseState,
+    pub camera_pose: Pose,
+    pub leveled_camera_pose: Pose,
+    pub raw_sensor_data: SensorData,
+    pub status_flags: Status,
+    pub last_vision_processing_time: f64,
+    pub last_vision_frame_latency: f64,
+    pub last_camera_frame_counter: u32,
 }
 
-impl SensorDescription {
-    fn from_ll(sd: ll::SensorDesc) -> SensorDescription {
-        SensorDescription {
-            vendor_id: sd.vendor_id as i16,
-            product_id: sd.product_id as i16,
-            serial_number: unsafe { from_buf((&sd.serial_number[0] as *const i8) as *const u8) }
+impl TrackingState {
+    fn from_ll(ts: ll::TrackingState) -> TrackingState {
+        TrackingState {
+            head_pose: PoseState::from_ll(ts.head_pose),
+            camera_pose: Pose::from_ll(ts.camera_pose),
+            leveled_camera_pose: Pose::from_ll(ts.leveled_camera_pose),
+            raw_sensor_data: SensorData::from_ll(ts.raw_sensor_data),
+            status_flags: Status{flags: ts.status_flags},
+            last_vision_processing_time: ts.last_vision_processing_time as f64,
+            last_vision_frame_latency: ts.last_vision_frame_latency as f64,
+            last_camera_frame_counter: ts.last_camera_frame_counter as u32
         }
     }
 }
@@ -951,28 +1042,6 @@ impl<T> PerEye<T> {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct HmdDescriptionEye {
-    pub default_eye_fov: FovPort,
-    pub max_eye_fov: FovPort,
-}
-
-#[derive(Debug, Clone)]
-pub struct HmdDescription {
-    pub hmd_type: HmdType,
-    pub product_name: String,
-    pub manufacture: String,
-    pub hmd_capabilities: HmdCapabilities,
-    pub sensor_capabilities: SensorCapabilities,
-    pub distortion_capabilities: DistortionCapabilities,
-    pub resolution: ll::Sizei,
-    pub window_position: ll::Vector2i,
-    pub eye_fovs: PerEye<HmdDescriptionEye>,
-    pub eye_render_order: [Eye; 2],
-    pub display_device_name: String,
-    pub display_id: c_int
-}
-
 fn from_buf(ptr: *const u8) -> String {
     use std::ffi::{CString, c_str_to_bytes};
     unsafe { CString::from_slice(c_str_to_bytes(&(ptr as *const i8)))
@@ -981,41 +1050,7 @@ fn from_buf(ptr: *const u8) -> String {
             .to_string() }
 }
 
-impl HmdDescription {
-    fn from_ll(sd: ll::HmdDesc) -> HmdDescription {
-        unsafe {
-            HmdDescription {
-                hmd_type: HmdType::from_ll(sd.hmd_type),
-                product_name: from_buf((sd.product_name as *const i8) as *const u8),
-                manufacture: from_buf((sd.manufacture as *const i8) as *const u8),
-                hmd_capabilities: HmdCapabilities{
-                    flags: sd.hmd_capabilities
-                },
-                sensor_capabilities: SensorCapabilities{
-                    flags: sd.sensor_capabilities
-                },
-                distortion_capabilities: DistortionCapabilities{
-                    flags: sd.distortion_capabilities
-                },
-                resolution: sd.resolution,
-                window_position: sd.window_position,
-                eye_fovs: PerEye::new(
-                    HmdDescriptionEye {
-                        default_eye_fov: FovPort::from_ll(sd.default_eye_fov[ll::Eye_Left as usize]),
-                        max_eye_fov: FovPort::from_ll(sd.max_eye_fov[ll::Eye_Left as usize])
-                    },
-                    HmdDescriptionEye {
-                        default_eye_fov: FovPort::from_ll(sd.default_eye_fov[ll::Eye_Right as usize]),
-                        max_eye_fov: FovPort::from_ll(sd.max_eye_fov[ll::Eye_Right as usize])
-                    }
-                ),
-                eye_render_order: [Eye::from_ll(sd.eye_render_order[0]),
-                                   Eye::from_ll(sd.eye_render_order[1])],
-                display_device_name: from_buf((sd.display_device_name as *const i8) as *const u8),
-                display_id: sd.display_id
-            }
-        }
-    }
+impl Hmd {
 }
 
 #[derive(Debug, Copy, Clone)]

@@ -2,6 +2,9 @@
 /Makefile
 /bin
 /lib
-/modules/oculus_sdk_mac/LibOVR/Lib/Mac/Xcode/Release/
+/modules/oculus_sdk_mac/LibOVR/Lib/Mac/Release/
+/modules/oculus_sdk_mac/LibOVR/Projects/Mac/Xcode/LibOVR.xcodeproj/project.xcworkspace/xcuserdata/
+/modules/oculus_sdk_mac/LibOVR/Projects/Mac/Xcode/LibOVR.xcodeproj/xcuserdata/
 /target
 *.py[co]
+.DS_Store

@@ -2,14 +2,14 @@
 name = "ovr"
 version = "0.1.0"
 dependencies = [
- "cgmath 0.0.7 (registry+https://github.com/rust-lang/crates.io-index)",
+ "cgmath 0.0.7 (git+https://github.com/bjz/cgmath-rs)",
  "libc 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "cgmath"
 version = "0.0.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+source = "git+https://github.com/bjz/cgmath-rs#f824d5f3189fc4168f398917e5cdf291219a6eec"
 dependencies = [
  "rand 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand_macros 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)",
